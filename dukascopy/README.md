@@ -48,6 +48,26 @@ Los archivos crudos quedan en caché entre ejecuciones (según símbolo y
 rango de fechas), así que si una corrida se corta o falla a la mitad,
 volver a ejecutarla retoma donde quedó en vez de descargar todo de nuevo.
 
+## Si Dukascopy empieza a devolver "demasiadas peticiones" (HTTP 429)
+
+Dukascopy limita cuántas peticiones tolera por minuto desde una misma IP,
+y las IPs de los runners de GitHub Actions suelen estar más vigiladas que
+una conexión normal. `download_bi5.py` ya trae protección para esto:
+
+- Reparte las peticiones a un ritmo fijo entre todos los hilos
+  (`--rate-limit`, 4 por segundo por defecto — antes se mandaban 16 en
+  paralelo sin ningún límite, lo cual terminó bloqueando la descarga).
+- Si el servidor empieza a responder 429, frena TODAS las peticiones
+  durante un enfriamiento que crece con cada 429 nuevo, en vez de seguir
+  insistiendo a la misma velocidad.
+- Si aun así quedan horas sin poder descargarse, no aborta el resto del
+  proceso: convierte y sube a Drive lo que sí se logró, y deja la lista
+  de horas faltantes en `_failed_hours_<SYMBOL>.txt` (dentro de la
+  carpeta de datos crudos) — el resumen del workflow en GitHub Actions
+  también la muestra. **Si ves ese aviso, simplemente vuelve a correr el
+  workflow con las mismas fechas**: los archivos ya descargados se
+  omiten y solo se reintentan las horas que faltaron.
+
 ## Ejecutarlo localmente en vez de con Actions
 
 ```bash

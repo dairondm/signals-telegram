@@ -46,12 +46,17 @@ jobs:
 
       # Conserva los archivos crudos entre re-ejecuciones de este workflow
       # para que una corrida fallida o cortada por timeout pueda reanudar
-      # en vez de descargar todo de nuevo.
+      # en vez de descargar todo de nuevo. La key incluye el run_id para
+      # que SIEMPRE se guarde al final (actions/cache no re-guarda en un
+      # cache hit de key exacta); restore-keys busca la corrida previa más
+      # reciente con las mismas fechas para restaurar su progreso.
       - name: Cachear tick data cruda
         uses: actions/cache@v4
         with:
           path: dukascopy_data/raw
-          key: dukascopy-raw-${{ github.event.inputs.symbol }}-${{ github.event.inputs.start_date }}-${{ steps.dates.outputs.end_date }}
+          key: dukascopy-raw-${{ github.event.inputs.symbol }}-${{ github.event.inputs.start_date }}-${{ steps.dates.outputs.end_date }}-${{ github.run_id }}
+          restore-keys: |
+            dukascopy-raw-${{ github.event.inputs.symbol }}-${{ github.event.inputs.start_date }}-${{ steps.dates.outputs.end_date }}-
 
       - name: Descargar archivos .bi5 crudos
         run: |
@@ -60,7 +65,27 @@ jobs:
             --start "${{ github.event.inputs.start_date }}" \
             --end "${{ steps.dates.outputs.end_date }}" \
             --out-dir dukascopy_data/raw \
-            --concurrency 16
+            --concurrency 6 \
+            --rate-limit 4
+
+      # No aborta el job aunque falten horas (download_bi5.py solo sale
+      # con error si no se logró NINGÚN dato); esto solo deja constancia
+      # visible de qué faltó, para saber si conviene volver a correr el
+      # workflow y completar el rango.
+      - name: Reportar horas faltantes
+        if: always()
+        run: |
+          F="dukascopy_data/raw/_failed_hours_${{ github.event.inputs.symbol }}.txt"
+          if [ -f "$F" ]; then
+            COUNT=$(wc -l < "$F")
+            echo "### ⚠️ $COUNT horas no se pudieron descargar" >> "$GITHUB_STEP_SUMMARY"
+            echo "Vuelve a ejecutar este workflow con las mismas fechas para reintentarlas (lo ya descargado se conserva en caché)." >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+            head -n 50 "$F" >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "### ✅ Todas las horas del rango se descargaron correctamente" >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       - name: Convertir a CSV
         run: |
