@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
-"""Upload a file to a Google Drive folder using a service-account.
+"""Sube un archivo a una carpeta de Google Drive usando una cuenta de
+servicio (service account).
 
-Requires a service account JSON key with the Drive API enabled, and the
-target folder shared with that service account's email (Editor access).
+Requiere una clave JSON de cuenta de servicio con la Drive API habilitada,
+y la carpeta destino compartida con el email de esa cuenta (acceso de
+Editor).
 
-Credentials are read from the GDRIVE_SA_JSON environment variable (the raw
-JSON key content) unless --credentials-file points at a file instead.
+Las credenciales se leen de la variable de entorno GDRIVE_SA_JSON (el
+contenido JSON crudo de la clave), salvo que --credentials-file apunte a
+un archivo en su lugar.
 """
 import argparse
 import os
@@ -24,7 +27,7 @@ def get_credentials(credentials_file: Path | None):
         return service_account.Credentials.from_service_account_file(str(credentials_file), scopes=SCOPES)
     raw = os.environ.get("GDRIVE_SA_JSON")
     if not raw:
-        raise SystemExit("Set GDRIVE_SA_JSON env var or pass --credentials-file")
+        raise SystemExit("Define la variable de entorno GDRIVE_SA_JSON o pasa --credentials-file")
     import json
     info = json.loads(raw)
     return service_account.Credentials.from_service_account_info(info, scopes=SCOPES)
@@ -33,20 +36,20 @@ def get_credentials(credentials_file: Path | None):
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--file", required=True, type=Path)
-    ap.add_argument("--folder-id", required=True, help="Destination Google Drive folder ID")
+    ap.add_argument("--folder-id", required=True, help="ID de la carpeta destino en Google Drive")
     ap.add_argument("--credentials-file", type=Path, default=None)
-    ap.add_argument("--name", default=None, help="Name to use in Drive (defaults to local filename)")
+    ap.add_argument("--name", default=None, help="Nombre a usar en Drive (por defecto, el nombre local del archivo)")
     args = ap.parse_args()
 
     if not args.file.exists():
-        raise SystemExit(f"File not found: {args.file}")
+        raise SystemExit(f"Archivo no encontrado: {args.file}")
 
     creds = get_credentials(args.credentials_file)
     service = build("drive", "v3", credentials=creds)
 
     name = args.name or args.file.name
     size_mb = args.file.stat().st_size / (1024 * 1024)
-    print(f"Uploading {args.file} ({size_mb:.1f} MB) as '{name}' to folder {args.folder_id}")
+    print(f"Subiendo {args.file} ({size_mb:.1f} MB) como '{name}' a la carpeta {args.folder_id}")
 
     media = MediaFileUpload(str(args.file), resumable=True, chunksize=50 * 1024 * 1024)
     request = service.files().create(
@@ -58,10 +61,10 @@ def main():
     while response is None:
         status, response = request.next_chunk()
         if status:
-            print(f"  progress: {int(status.progress() * 100)}%")
+            print(f"  progreso: {int(status.progress() * 100)}%")
 
-    print(f"Uploaded. File ID: {response['id']}")
-    print(f"Link: {response.get('webViewLink', 'n/a')}")
+    print(f"Subido. ID del archivo: {response['id']}")
+    print(f"Enlace: {response.get('webViewLink', 'n/a')}")
 
 
 if __name__ == "__main__":

@@ -1,16 +1,19 @@
 #!/usr/bin/env python3
-"""Download raw hourly tick files (.bi5) from Dukascopy's public historical feed.
+"""Descarga los archivos horarios de ticks crudos (.bi5) del feed histórico
+público de Dukascopy.
 
-Dukascopy exposes one LZMA-compressed file per instrument/hour at:
+Dukascopy expone un archivo comprimido en LZMA por instrumento/hora en:
     https://datafeed.dukascopy.com/datafeed/{SYMBOL}/{YYYY}/{MM}/{DD}/{HH}h_ticks.bi5
 
-Note the month in the URL is zero-indexed (January = 00, December = 11) -
-that is Dukascopy's own convention, not a bug here. Hours with no trading
-(e.g. most weekend hours) come back as HTTP 200 with an empty body; those
-are recorded as empty placeholder files so re-runs don't re-request them.
+Nota: el mes en la URL empieza en 0 (enero = 00, diciembre = 11); esa es
+la convención propia de Dukascopy, no un error de este script. Las horas
+sin operativa (ej. la mayoría de las horas de fin de semana) devuelven
+HTTP 200 con cuerpo vacío; se guardan como archivos vacíos "marcadores"
+para que las re-ejecuciones no vuelvan a pedirlas.
 
-Files are saved under --out-dir mirroring Dukascopy's own path layout, so
-convert_to_csv.py can walk the tree back into chronological order.
+Los archivos se guardan bajo --out-dir replicando la misma estructura de
+rutas de Dukascopy, para que convert_to_csv.py pueda recorrerlos en orden
+cronológico.
 """
 import argparse
 import datetime as dt
@@ -53,7 +56,7 @@ def remote_url(symbol: str, hour: dt.datetime) -> str:
 def fetch_one(session: requests.Session, symbol: str, hour: dt.datetime, out_dir: Path, retries: int) -> str:
     path = local_path(out_dir, symbol, hour)
     if path.exists():
-        return "skip"
+        return "skip"  # ya descargado
 
     url = remote_url(symbol, hour)
     last_err = None
@@ -62,7 +65,7 @@ def fetch_one(session: requests.Session, symbol: str, hour: dt.datetime, out_dir
             resp = session.get(url, timeout=30)
             if resp.status_code == 200:
                 path.parent.mkdir(parents=True, exist_ok=True)
-                path.write_bytes(resp.content)  # may be empty -> no ticks that hour
+                path.write_bytes(resp.content)  # puede estar vacío -> sin ticks esa hora
                 return "empty" if len(resp.content) == 0 else "ok"
             if resp.status_code == 404:
                 path.parent.mkdir(parents=True, exist_ok=True)
@@ -78,9 +81,9 @@ def fetch_one(session: requests.Session, symbol: str, hour: dt.datetime, out_dir
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--symbol", required=True, help="Dukascopy instrument code, e.g. XAUUSD")
-    ap.add_argument("--start", required=True, help="Start date YYYY-MM-DD (inclusive)")
-    ap.add_argument("--end", required=True, help="End date YYYY-MM-DD (inclusive)")
+    ap.add_argument("--symbol", required=True, help="Código del instrumento en Dukascopy, ej. XAUUSD")
+    ap.add_argument("--start", required=True, help="Fecha de inicio YYYY-MM-DD (inclusive)")
+    ap.add_argument("--end", required=True, help="Fecha de fin YYYY-MM-DD (inclusive)")
     ap.add_argument("--out-dir", required=True, type=Path)
     ap.add_argument("--concurrency", type=int, default=16)
     ap.add_argument("--retries", type=int, default=4)
@@ -89,11 +92,11 @@ def main():
     start = dt.date.fromisoformat(args.start)
     end = dt.date.fromisoformat(args.end)
     if end < start:
-        raise SystemExit("--end must not be before --start")
+        raise SystemExit("--end no puede ser anterior a --start")
 
     hours = list(hour_range(start, end))
-    print(f"Downloading {len(hours)} hourly files for {args.symbol} "
-          f"from {start} to {end} into {args.out_dir}")
+    print(f"Descargando {len(hours)} archivos horarios de {args.symbol} "
+          f"desde {start} hasta {end} en {args.out_dir}")
 
     counts = {"ok": 0, "empty": 0, "skip": 0, "failed": 0}
     session = requests.Session()
@@ -108,14 +111,15 @@ def main():
             counts[result] += 1
             done += 1
             if done % 200 == 0 or done == len(hours):
-                print(f"  progress: {done}/{len(hours)} "
-                      f"(ok={counts['ok']} empty={counts['empty']} "
-                      f"skip={counts['skip']} failed={counts['failed']})")
+                print(f"  progreso: {done}/{len(hours)} "
+                      f"(ok={counts['ok']} vacías={counts['empty']} "
+                      f"omitidas={counts['skip']} fallidas={counts['failed']})")
 
-    print("Done.", counts)
+    print("Listo.", counts)
     if counts["failed"]:
-        print(f"{counts['failed']} hours failed after retries; re-run this "
-              f"script to resume (existing files are skipped).", file=sys.stderr)
+        print(f"{counts['failed']} horas fallaron tras los reintentos; vuelve a "
+              f"correr este script para reanudar (los archivos ya existentes "
+              f"se omiten).", file=sys.stderr)
         sys.exit(1)
 
 

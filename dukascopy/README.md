@@ -1,47 +1,54 @@
-# Dukascopy tick data downloader
+# Descargador de tick data de Dukascopy
 
-Downloads historical tick data from Dukascopy's public feed and uploads it
-to Google Drive, running as a GitHub Actions workflow (`.github/workflows/dukascopy-tickdata.yml`).
+Descarga tick data histórica del feed público de Dukascopy y la sube a
+Google Drive, corriendo como un workflow de GitHub Actions
+(`.github/workflows/dukascopy-tickdata.yml`).
 
-It runs on GitHub's own runners rather than locally because Dukascopy's
-servers are not reachable from every environment (e.g. sandboxed CI/agent
-containers with restricted egress) — GitHub Actions runners have normal
-outbound internet access.
+Corre en los runners de GitHub (y no localmente) porque los servidores de
+Dukascopy no son alcanzables desde todos los entornos (por ejemplo,
+contenedores de CI/agentes en sandbox con salida de red restringida) — los
+runners de GitHub Actions sí tienen acceso normal a internet.
 
-## One-time setup: Google Drive access
+## Configuración inicial: acceso a Google Drive
 
-1. In Google Cloud Console, create (or reuse) a project and enable the
+1. En Google Cloud Console, crea (o reutiliza) un proyecto y habilita la
    **Google Drive API**.
-2. Create a **service account**, then create a JSON key for it and download it.
-3. In Google Drive, create (or pick) a destination folder, share it with the
-   service account's email (looks like `name@project.iam.gserviceaccount.com`)
-   as **Editor**, and copy the folder ID from its URL
-   (`https://drive.google.com/drive/folders/<FOLDER_ID>`).
-4. In the GitHub repo, add two **Actions secrets**
+2. Crea una **cuenta de servicio (service account)**, y luego crea y
+   descarga una clave JSON para esa cuenta.
+3. En Google Drive, crea (o elige) una carpeta destino, compártela con el
+   email de la cuenta de servicio (algo como
+   `nombre@proyecto.iam.gserviceaccount.com`) con permiso de **Editor**, y
+   copia el ID de la carpeta desde su URL
+   (`https://drive.google.com/drive/folders/<ID_DE_CARPETA>`).
+4. En el repo de GitHub, agrega dos **secrets de Actions**
    (Settings -> Secrets and variables -> Actions):
-   - `GDRIVE_SA_JSON`: the full contents of the service account JSON key file.
-   - `GDRIVE_FOLDER_ID`: the destination folder ID from step 3.
+   - `GDRIVE_SA_JSON`: el contenido completo del archivo JSON de la cuenta
+     de servicio.
+   - `GDRIVE_FOLDER_ID`: el ID de la carpeta destino del paso 3.
 
-## Running it
+## Cómo ejecutarlo
 
-Go to the repo's **Actions** tab -> "Dukascopy tick data download" ->
-**Run workflow**, and set:
-- `symbol`: Dukascopy instrument code, e.g. `XAUUSD`
-- `start_date` / `end_date`: `YYYY-MM-DD`, end optional (defaults to today)
-- `upload_raw_bi5`: also upload the raw compressed files as a zip
-  (useful for re-converting later without re-downloading)
+Ve a la pestaña **Actions** del repo -> "Descarga de tick data de Dukascopy" ->
+**Run workflow**, y configura:
+- `symbol`: código del instrumento en Dukascopy, ej. `XAUUSD`
+- `start_date` / `end_date`: formato `YYYY-MM-DD`, `end_date` es opcional
+  (si se deja vacío usa la fecha de hoy)
+- `upload_raw_bi5`: si además quieres subir los archivos comprimidos
+  originales como un zip (útil para volver a convertirlos después sin
+  tener que descargarlos de nuevo)
 
-The workflow downloads the raw hourly `.bi5` files first (fast, network-bound),
-then converts them locally into a single sorted CSV
-(`timestamp_utc,bid,ask,bid_volume,ask_volume`), and uploads both to the
-Drive folder. A copy of the CSV is also attached as a workflow artifact as a
-fallback in case the Drive secrets aren't set up yet.
+El workflow primero descarga los archivos `.bi5` horarios crudos (rápido,
+limitado por red), luego los convierte localmente en un único CSV ordenado
+cronológicamente (`timestamp_utc,bid,ask,bid_volume,ask_volume`), y sube
+ambos a la carpeta de Drive. También se guarda una copia del CSV como
+artifact del workflow, como respaldo por si los secrets de Drive aún no
+están configurados.
 
-Raw files are cached between runs (keyed by symbol + date range), so if a
-run times out or fails partway through, re-running it resumes instead of
-re-downloading everything.
+Los archivos crudos quedan en caché entre ejecuciones (según símbolo y
+rango de fechas), así que si una corrida se corta o falla a la mitad,
+volver a ejecutarla retoma donde quedó en vez de descargar todo de nuevo.
 
-## Running locally instead
+## Ejecutarlo localmente en vez de con Actions
 
 ```bash
 pip install -r dukascopy/requirements.txt
@@ -51,13 +58,14 @@ python dukascopy/download_bi5.py --symbol XAUUSD --start 2026-01-01 --end 2026-0
 python dukascopy/convert_to_csv.py --symbol XAUUSD --in-dir data/raw --out-csv data/XAUUSD.csv
 
 GDRIVE_SA_JSON="$(cat service-account.json)" python dukascopy/upload_to_drive.py \
-  --file data/XAUUSD.csv --folder-id <FOLDER_ID>
+  --file data/XAUUSD.csv --folder-id <ID_DE_CARPETA>
 ```
 
-## Notes on price scaling
+## Notas sobre la escala de precios
 
-Dukascopy stores tick prices as scaled integers. `convert_to_csv.py` ships
-with divisors for a few common instruments (`XAUUSD`, `XAGUSD`, `EURUSD`,
-`GBPUSD`, `USDJPY`, `BTCUSD`); for anything else it defaults to 100000. If
-the decoded prices look off by a factor of 10/100/1000 from the real market
-price, pass `--point-divisor` explicitly.
+Dukascopy guarda los precios de cada tick como enteros escalados.
+`convert_to_csv.py` ya trae divisores para algunos instrumentos comunes
+(`XAUUSD`, `XAGUSD`, `EURUSD`, `GBPUSD`, `USDJPY`, `BTCUSD`); para
+cualquier otro usa 100000 por defecto. Si los precios decodificados se ven
+desfasados por un factor de 10/100/1000 respecto al precio real de
+mercado, pasa `--point-divisor` explícitamente para corregirlo.

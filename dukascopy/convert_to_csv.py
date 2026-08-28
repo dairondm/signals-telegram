@@ -1,19 +1,21 @@
 #!/usr/bin/env python3
-"""Convert raw Dukascopy .bi5 tick files (downloaded by download_bi5.py) into
-one chronologically sorted CSV suitable for backtesting.
+"""Convierte los archivos .bi5 crudos de Dukascopy (descargados con
+download_bi5.py) en un único CSV ordenado cronológicamente, listo para
+backtesting.
 
-Each .bi5 file is LZMA-compressed. Once decompressed it is a sequence of
-20-byte big-endian records, one per tick:
-    uint32  milliseconds since the start of that file's hour
-    uint32  ask price, scaled by the instrument's point divisor
-    uint32  bid price, scaled by the instrument's point divisor
-    float32 ask volume
-    float32 bid volume
+Cada archivo .bi5 está comprimido en LZMA. Una vez descomprimido, es una
+secuencia de registros de 20 bytes en big-endian, uno por tick:
+    uint32  milisegundos desde el inicio de la hora de ese archivo
+    uint32  precio ask, escalado por el divisor del instrumento
+    uint32  precio bid, escalado por el divisor del instrumento
+    float32 volumen ask
+    float32 volumen bid
 
-The point divisor differs per instrument (Dukascopy stores prices as
-scaled integers). Common defaults are provided below; if the decoded
-prices look off by a factor of 10/100/1000 from the real market price,
-override with --point-divisor.
+El divisor de precio varía según el instrumento (Dukascopy guarda los
+precios como enteros escalados). Abajo se incluyen valores por defecto
+para los más comunes; si los precios decodificados se ven desfasados por
+un factor de 10/100/1000 respecto al precio real de mercado, corrígelo
+con --point-divisor.
 """
 import argparse
 import csv
@@ -25,7 +27,7 @@ from pathlib import Path
 
 RECORD = struct.Struct(">IIIff")
 
-# Known Dukascopy price scaling factors. Extend as needed.
+# Factores de escala de precio conocidos de Dukascopy. Agrega más si hace falta.
 POINT_DIVISORS = {
     "XAUUSD": 1000,
     "XAGUSD": 1000,
@@ -38,7 +40,7 @@ DEFAULT_DIVISOR = 100000
 
 
 def parse_hour_from_path(path: Path):
-    # .../{SYMBOL}/{YYYY}/{MM}/{DD}/{HH}h_ticks.bi5, month is 0-indexed
+    # .../{SYMBOL}/{YYYY}/{MM}/{DD}/{HH}h_ticks.bi5, el mes empieza en 0
     hour = int(path.stem.split("h")[0])
     day = int(path.parent.name)
     month0 = int(path.parent.parent.name)
@@ -53,7 +55,7 @@ def iter_ticks(bi5_path: Path):
     try:
         data = lzma.decompress(raw)
     except lzma.LZMAError:
-        print(f"WARNING: could not decompress {bi5_path}, skipping", file=sys.stderr)
+        print(f"ADVERTENCIA: no se pudo descomprimir {bi5_path}, se omite", file=sys.stderr)
         return
     hour_start = parse_hour_from_path(bi5_path)
     for offset in range(0, len(data) - RECORD.size + 1, RECORD.size):
@@ -65,7 +67,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--symbol", required=True)
     ap.add_argument("--in-dir", required=True, type=Path,
-                     help="Directory passed as --out-dir to download_bi5.py")
+                     help="Directorio pasado como --out-dir a download_bi5.py")
     ap.add_argument("--out-csv", required=True, type=Path)
     ap.add_argument("--point-divisor", type=int, default=None)
     args = ap.parse_args()
@@ -73,11 +75,11 @@ def main():
     divisor = args.point_divisor or POINT_DIVISORS.get(args.symbol.upper(), DEFAULT_DIVISOR)
     symbol_dir = args.in_dir / args.symbol
     if not symbol_dir.is_dir():
-        raise SystemExit(f"No downloaded data found at {symbol_dir}")
+        raise SystemExit(f"No se encontraron datos descargados en {symbol_dir}")
 
     files = sorted(symbol_dir.glob("*/*/*/*h_ticks.bi5"))
-    print(f"Converting {len(files)} hourly files for {args.symbol} "
-          f"(point divisor={divisor}) -> {args.out_csv}")
+    print(f"Convirtiendo {len(files)} archivos horarios de {args.symbol} "
+          f"(divisor de precio={divisor}) -> {args.out_csv}")
 
     args.out_csv.parent.mkdir(parents=True, exist_ok=True)
     tick_count = 0
@@ -95,9 +97,9 @@ def main():
                 ])
                 tick_count += 1
             if i % 500 == 0 or i == len(files):
-                print(f"  progress: {i}/{len(files)} files, {tick_count} ticks written")
+                print(f"  progreso: {i}/{len(files)} archivos, {tick_count} ticks escritos")
 
-    print(f"Done. {tick_count} ticks written to {args.out_csv}")
+    print(f"Listo. {tick_count} ticks escritos en {args.out_csv}")
 
 
 if __name__ == "__main__":

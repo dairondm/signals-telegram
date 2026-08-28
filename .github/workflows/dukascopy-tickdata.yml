@@ -1,22 +1,22 @@
-name: Dukascopy tick data download
+name: Descarga de tick data de Dukascopy
 
 on:
   workflow_dispatch:
     inputs:
       symbol:
-        description: "Dukascopy instrument code"
+        description: "Código del instrumento en Dukascopy"
         required: true
         default: "XAUUSD"
       start_date:
-        description: "Start date (YYYY-MM-DD, inclusive)"
+        description: "Fecha de inicio (YYYY-MM-DD, inclusive)"
         required: true
         default: "2026-01-01"
       end_date:
-        description: "End date (YYYY-MM-DD, inclusive). Leave empty for today."
+        description: "Fecha de fin (YYYY-MM-DD, inclusive). Deja vacío para usar hoy."
         required: false
         default: ""
       upload_raw_bi5:
-        description: "Also zip and upload the raw .bi5 files to Drive"
+        description: "También comprimir y subir a Drive los archivos .bi5 crudos"
         type: boolean
         required: false
         default: true
@@ -32,10 +32,10 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install dependencies
+      - name: Instalar dependencias
         run: pip install -r dukascopy/requirements.txt
 
-      - name: Resolve end date
+      - name: Resolver fecha de fin
         id: dates
         run: |
           if [ -z "${{ github.event.inputs.end_date }}" ]; then
@@ -44,15 +44,16 @@ jobs:
             echo "end_date=${{ github.event.inputs.end_date }}" >> "$GITHUB_OUTPUT"
           fi
 
-      # Persists raw files between re-runs of this workflow so a failed or
-      # timed-out run can resume instead of re-downloading everything.
-      - name: Cache raw tick data
+      # Conserva los archivos crudos entre re-ejecuciones de este workflow
+      # para que una corrida fallida o cortada por timeout pueda reanudar
+      # en vez de descargar todo de nuevo.
+      - name: Cachear tick data cruda
         uses: actions/cache@v4
         with:
           path: dukascopy_data/raw
           key: dukascopy-raw-${{ github.event.inputs.symbol }}-${{ github.event.inputs.start_date }}-${{ steps.dates.outputs.end_date }}
 
-      - name: Download raw .bi5 files
+      - name: Descargar archivos .bi5 crudos
         run: |
           python dukascopy/download_bi5.py \
             --symbol "${{ github.event.inputs.symbol }}" \
@@ -61,20 +62,20 @@ jobs:
             --out-dir dukascopy_data/raw \
             --concurrency 16
 
-      - name: Convert to CSV
+      - name: Convertir a CSV
         run: |
           python dukascopy/convert_to_csv.py \
             --symbol "${{ github.event.inputs.symbol }}" \
             --in-dir dukascopy_data/raw \
             --out-csv dukascopy_data/csv/${{ github.event.inputs.symbol }}_${{ github.event.inputs.start_date }}_${{ steps.dates.outputs.end_date }}.csv
 
-      - name: Zip raw .bi5 files
+      - name: Comprimir archivos .bi5 crudos
         if: ${{ github.event.inputs.upload_raw_bi5 == 'true' }}
         run: |
           zip -r -q dukascopy_data/${{ github.event.inputs.symbol }}_${{ github.event.inputs.start_date }}_${{ steps.dates.outputs.end_date }}_raw.zip \
             dukascopy_data/raw/${{ github.event.inputs.symbol }}
 
-      - name: Upload CSV to Google Drive
+      - name: Subir CSV a Google Drive
         env:
           GDRIVE_SA_JSON: ${{ secrets.GDRIVE_SA_JSON }}
         run: |
@@ -82,7 +83,7 @@ jobs:
             --file dukascopy_data/csv/${{ github.event.inputs.symbol }}_${{ github.event.inputs.start_date }}_${{ steps.dates.outputs.end_date }}.csv \
             --folder-id "${{ secrets.GDRIVE_FOLDER_ID }}"
 
-      - name: Upload raw .bi5 zip to Google Drive
+      - name: Subir zip de .bi5 crudos a Google Drive
         if: ${{ github.event.inputs.upload_raw_bi5 == 'true' }}
         env:
           GDRIVE_SA_JSON: ${{ secrets.GDRIVE_SA_JSON }}
@@ -91,9 +92,10 @@ jobs:
             --file dukascopy_data/${{ github.event.inputs.symbol }}_${{ github.event.inputs.start_date }}_${{ steps.dates.outputs.end_date }}_raw.zip \
             --folder-id "${{ secrets.GDRIVE_FOLDER_ID }}"
 
-      # Fallback so the data is retrievable even if the Drive upload/secrets
-      # aren't set up yet. Artifacts expire after 90 days by default.
-      - name: Upload CSV as workflow artifact (fallback)
+      # Respaldo para que los datos sigan siendo recuperables aunque la
+      # subida a Drive o los secrets aún no estén configurados. Los
+      # artifacts expiran a los 90 días por defecto.
+      - name: Subir CSV como artifact del workflow (respaldo)
         if: always()
         uses: actions/upload-artifact@v4
         with:
