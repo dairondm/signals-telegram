@@ -20,6 +20,10 @@ on:
         type: boolean
         required: false
         default: true
+      reuse_csv_from_run_id:
+        description: "OPCIONAL: ID de una corrida anterior de este workflow. Si lo llenas, se salta la descarga/conversión y solo se baja el CSV que esa corrida ya generó (artifact) y se sube a Drive."
+        required: false
+        default: ""
 
 jobs:
   download:
@@ -51,6 +55,7 @@ jobs:
       # cache hit de key exacta); restore-keys busca la corrida previa más
       # reciente con las mismas fechas para restaurar su progreso.
       - name: Cachear tick data cruda
+        if: ${{ github.event.inputs.reuse_csv_from_run_id == '' }}
         uses: actions/cache@v4
         with:
           path: dukascopy_data/raw
@@ -59,6 +64,7 @@ jobs:
             dukascopy-raw-${{ github.event.inputs.symbol }}-${{ github.event.inputs.start_date }}-${{ steps.dates.outputs.end_date }}-
 
       - name: Descargar archivos .bi5 crudos
+        if: ${{ github.event.inputs.reuse_csv_from_run_id == '' }}
         run: |
           python dukascopy/download_bi5.py \
             --symbol "${{ github.event.inputs.symbol }}" \
@@ -73,7 +79,7 @@ jobs:
       # visible de qué faltó, para saber si conviene volver a correr el
       # workflow y completar el rango.
       - name: Reportar horas faltantes
-        if: always()
+        if: ${{ always() && github.event.inputs.reuse_csv_from_run_id == '' }}
         run: |
           F="dukascopy_data/raw/_failed_hours_${{ github.event.inputs.symbol }}.txt"
           if [ -f "$F" ]; then
@@ -88,6 +94,7 @@ jobs:
           fi
 
       - name: Convertir a CSV
+        if: ${{ github.event.inputs.reuse_csv_from_run_id == '' }}
         run: |
           python dukascopy/convert_to_csv.py \
             --symbol "${{ github.event.inputs.symbol }}" \
@@ -95,10 +102,23 @@ jobs:
             --out-csv dukascopy_data/csv/${{ github.event.inputs.symbol }}_${{ github.event.inputs.start_date }}_${{ steps.dates.outputs.end_date }}.csv
 
       - name: Comprimir archivos .bi5 crudos
-        if: ${{ github.event.inputs.upload_raw_bi5 == 'true' }}
+        if: ${{ github.event.inputs.upload_raw_bi5 == 'true' && github.event.inputs.reuse_csv_from_run_id == '' }}
         run: |
           zip -r -q dukascopy_data/${{ github.event.inputs.symbol }}_${{ github.event.inputs.start_date }}_${{ steps.dates.outputs.end_date }}_raw.zip \
             dukascopy_data/raw/${{ github.event.inputs.symbol }}
+
+      # Cuando reuse_csv_from_run_id está lleno, no se descarga nada de
+      # Dukascopy: se toma directamente el CSV que esa corrida anterior ya
+      # generó y guardó como artifact, para no repetir 40+ minutos de
+      # descarga solo para reintentar la subida a Drive.
+      - name: Descargar CSV de una corrida anterior
+        if: ${{ github.event.inputs.reuse_csv_from_run_id != '' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ github.event.inputs.symbol }}-tickdata-csv
+          run-id: ${{ github.event.inputs.reuse_csv_from_run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: dukascopy_data/csv
 
       - name: Subir CSV a Google Drive
         env:
@@ -107,12 +127,17 @@ jobs:
           GDRIVE_OAUTH_REFRESH_TOKEN: ${{ secrets.GDRIVE_OAUTH_REFRESH_TOKEN }}
           GDRIVE_SA_JSON: ${{ secrets.GDRIVE_SA_JSON }}
         run: |
+          FILE=$(find dukascopy_data/csv -name '*.csv' | head -n 1)
+          if [ -z "$FILE" ]; then
+            echo "No se encontró ningún .csv en dukascopy_data/csv" >&2
+            exit 1
+          fi
           python dukascopy/upload_to_drive.py \
-            --file dukascopy_data/csv/${{ github.event.inputs.symbol }}_${{ github.event.inputs.start_date }}_${{ steps.dates.outputs.end_date }}.csv \
+            --file "$FILE" \
             --folder-id "${{ secrets.GDRIVE_FOLDER_ID }}"
 
       - name: Subir zip de .bi5 crudos a Google Drive
-        if: ${{ github.event.inputs.upload_raw_bi5 == 'true' }}
+        if: ${{ github.event.inputs.upload_raw_bi5 == 'true' && github.event.inputs.reuse_csv_from_run_id == '' }}
         env:
           GDRIVE_OAUTH_CLIENT_ID: ${{ secrets.GDRIVE_OAUTH_CLIENT_ID }}
           GDRIVE_OAUTH_CLIENT_SECRET: ${{ secrets.GDRIVE_OAUTH_CLIENT_SECRET }}
@@ -127,7 +152,7 @@ jobs:
       # subida a Drive o los secrets aún no estén configurados. Los
       # artifacts expiran a los 90 días por defecto.
       - name: Subir CSV como artifact del workflow (respaldo)
-        if: always()
+        if: ${{ always() && github.event.inputs.reuse_csv_from_run_id == '' }}
         uses: actions/upload-artifact@v4
         with:
           name: ${{ github.event.inputs.symbol }}-tickdata-csv
