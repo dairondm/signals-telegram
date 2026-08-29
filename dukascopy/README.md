@@ -11,20 +11,55 @@ runners de GitHub Actions sí tienen acceso normal a internet.
 
 ## Configuración inicial: acceso a Google Drive
 
+**Importante:** una cuenta de servicio de Google **no puede** crear
+archivos en una carpeta normal de "Mi unidad" — Google las bloquea con el
+error `storageQuotaExceeded` porque las cuentas de servicio no tienen
+cuota de almacenamiento propia (solo funcionan si el destino es una
+Unidad compartida de Google Workspace). Si tu Drive es una cuenta Gmail
+normal, tienes que usar **OAuth2 con tu propia cuenta** en su lugar
+(opción A). Si sí tienes una Unidad compartida de Workspace, la cuenta de
+servicio original funciona (opción B).
+
+### Opción A — OAuth2 con tu cuenta de Google (Gmail personal)
+
 1. En Google Cloud Console, crea (o reutiliza) un proyecto y habilita la
    **Google Drive API**.
-2. Crea una **cuenta de servicio (service account)**, y luego crea y
-   descarga una clave JSON para esa cuenta.
-3. En Google Drive, crea (o elige) una carpeta destino, compártela con el
-   email de la cuenta de servicio (algo como
-   `nombre@proyecto.iam.gserviceaccount.com`) con permiso de **Editor**, y
-   copia el ID de la carpeta desde su URL
+2. Ve a "APIs y servicios" -> "Credenciales" -> "Crear credenciales" ->
+   "ID de cliente de OAuth". Si te pide configurar la "pantalla de
+   consentimiento" primero, elige "Externo" y agrégate como usuario de
+   prueba. Tipo de aplicación: **App de escritorio**. Copia el ID de
+   cliente y el secreto del cliente que te da.
+3. En Google Drive, crea (o elige) la carpeta destino (una carpeta normal
+   está bien) y copia su ID desde la URL
    (`https://drive.google.com/drive/folders/<ID_DE_CARPETA>`).
-4. En el repo de GitHub, agrega dos **secrets de Actions**
-   (Settings -> Secrets and variables -> Actions):
-   - `GDRIVE_SA_JSON`: el contenido completo del archivo JSON de la cuenta
-     de servicio.
-   - `GDRIVE_FOLDER_ID`: el ID de la carpeta destino del paso 3.
+4. En tu computadora (no aquí), corre **una sola vez**:
+   ```bash
+   pip install -r dukascopy/requirements-oauth-setup.txt
+   python dukascopy/get_drive_refresh_token.py \
+     --client-id TU_CLIENT_ID.apps.googleusercontent.com \
+     --client-secret TU_CLIENT_SECRET
+   ```
+   Esto abre el navegador para que autorices con la cuenta de Google
+   dueña de la carpeta, y al final imprime tres valores.
+5. En el repo de GitHub, agrega esos tres valores más el ID de la carpeta
+   como **secrets de Actions** (Settings -> Secrets and variables ->
+   Actions):
+   - `GDRIVE_OAUTH_CLIENT_ID`
+   - `GDRIVE_OAUTH_CLIENT_SECRET`
+   - `GDRIVE_OAUTH_REFRESH_TOKEN`
+   - `GDRIVE_FOLDER_ID`: el ID de la carpeta del paso 3.
+
+### Opción B — Cuenta de servicio (solo con Unidad compartida de Workspace)
+
+1. En Google Cloud Console, habilita la **Google Drive API** y crea una
+   **cuenta de servicio**; descarga su clave JSON.
+2. Crea una **Unidad compartida** (no una carpeta normal) en Google Drive
+   y agrega el email de la cuenta de servicio como miembro con permiso de
+   Contenido/Editor. Copia el ID de la carpeta destino dentro de esa
+   Unidad compartida.
+3. Agrega dos secrets de Actions:
+   - `GDRIVE_SA_JSON`: el contenido completo del archivo JSON.
+   - `GDRIVE_FOLDER_ID`: el ID de la carpeta dentro de la Unidad compartida.
 
 ## Cómo ejecutarlo
 
@@ -77,8 +112,8 @@ python dukascopy/download_bi5.py --symbol XAUUSD --start 2026-01-01 --end 2026-0
 
 python dukascopy/convert_to_csv.py --symbol XAUUSD --in-dir data/raw --out-csv data/XAUUSD.csv
 
-GDRIVE_SA_JSON="$(cat service-account.json)" python dukascopy/upload_to_drive.py \
-  --file data/XAUUSD.csv --folder-id <ID_DE_CARPETA>
+GDRIVE_OAUTH_CLIENT_ID="..." GDRIVE_OAUTH_CLIENT_SECRET="..." GDRIVE_OAUTH_REFRESH_TOKEN="..." \
+  python dukascopy/upload_to_drive.py --file data/XAUUSD.csv --folder-id <ID_DE_CARPETA>
 ```
 
 ## Notas sobre la escala de precios

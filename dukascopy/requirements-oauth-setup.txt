@@ -1,0 +1,3 @@
+# Solo hace falta para correr get_drive_refresh_token.py localmente una vez.
+# No se usa en el workflow de GitHub Actions (por eso no está en requirements.txt).
+google-auth-oauthlib>=1.2

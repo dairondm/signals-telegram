@@ -1,21 +1,28 @@
 #!/usr/bin/env python3
-"""Sube un archivo a una carpeta de Google Drive usando una cuenta de
-servicio (service account).
+"""Sube un archivo a una carpeta de Google Drive.
 
-Requiere una clave JSON de cuenta de servicio con la Drive API habilitada,
-y la carpeta destino compartida con el email de esa cuenta (acceso de
-Editor).
+Soporta dos formas de autenticarse, en este orden de prioridad:
 
-Las credenciales se leen de la variable de entorno GDRIVE_SA_JSON (el
-contenido JSON crudo de la clave), salvo que --credentials-file apunte a
-un archivo en su lugar.
+1. OAuth2 con tu propia cuenta de Google (recomendado para Drive personal
+   / Gmail normal). Variables de entorno: GDRIVE_OAUTH_REFRESH_TOKEN,
+   GDRIVE_OAUTH_CLIENT_ID, GDRIVE_OAUTH_CLIENT_SECRET. El refresh token se
+   obtiene una sola vez corriendo get_drive_refresh_token.py localmente
+   (ver README). Esto es necesario porque las cuentas de servicio NO
+   tienen cuota de almacenamiento propia en "Mi unidad" y no pueden crear
+   archivos ahí (error "storageQuotaExceeded") — solo funcionan si el
+   destino es una Unidad compartida de Google Workspace.
+2. Cuenta de servicio (service account): GDRIVE_SA_JSON (contenido JSON
+   crudo) o --credentials-file. Solo funciona si --folder-id apunta a una
+   Unidad compartida (Shared Drive), no a una carpeta normal.
 """
 import argparse
+import json
 import os
 import sys
 from pathlib import Path
 
 from google.oauth2 import service_account
+from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 
@@ -23,14 +30,37 @@ SCOPES = ["https://www.googleapis.com/auth/drive.file"]
 
 
 def get_credentials(credentials_file: Path | None):
+    refresh_token = os.environ.get("GDRIVE_OAUTH_REFRESH_TOKEN")
+    if refresh_token:
+        client_id = os.environ.get("GDRIVE_OAUTH_CLIENT_ID")
+        client_secret = os.environ.get("GDRIVE_OAUTH_CLIENT_SECRET")
+        if not client_id or not client_secret:
+            raise SystemExit(
+                "Con GDRIVE_OAUTH_REFRESH_TOKEN definido también hacen falta "
+                "GDRIVE_OAUTH_CLIENT_ID y GDRIVE_OAUTH_CLIENT_SECRET"
+            )
+        return Credentials(
+            None,  # sin access token todavía; se obtiene uno nuevo con el refresh token
+            refresh_token=refresh_token,
+            token_uri="https://oauth2.googleapis.com/token",
+            client_id=client_id,
+            client_secret=client_secret,
+            scopes=SCOPES,
+        )
+
     if credentials_file:
         return service_account.Credentials.from_service_account_file(str(credentials_file), scopes=SCOPES)
     raw = os.environ.get("GDRIVE_SA_JSON")
-    if not raw:
-        raise SystemExit("Define la variable de entorno GDRIVE_SA_JSON o pasa --credentials-file")
-    import json
-    info = json.loads(raw)
-    return service_account.Credentials.from_service_account_info(info, scopes=SCOPES)
+    if raw:
+        info = json.loads(raw)
+        return service_account.Credentials.from_service_account_info(info, scopes=SCOPES)
+
+    raise SystemExit(
+        "Define GDRIVE_OAUTH_REFRESH_TOKEN (+ GDRIVE_OAUTH_CLIENT_ID/SECRET) "
+        "para subir con tu cuenta de Google, o GDRIVE_SA_JSON / "
+        "--credentials-file para una cuenta de servicio (solo válido con "
+        "Unidades compartidas)."
+    )
 
 
 def main():
